@@ -11,7 +11,8 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 # ==========================================
@@ -28,7 +29,6 @@ df.columns = df.columns.str.strip()
 print("Columns found and mapped successfully!")
 
 # Map your specific CSV column names to standard working names
-# Notice we use 'Siblings/Spouses Aboard' and 'Parents/Children Aboard'
 df = df.rename(
     columns={
         "Siblings/Spouses Aboard": "SibSp",
@@ -55,40 +55,65 @@ X = df.drop(columns=[target])
 y = df[target]
 
 # ==========================================
-# Step 3: Split data and fit Logistic Regression
+# Step 3: Single-Split Baseline Evaluation
 # ==========================================
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+# Using a Pipeline ensures scaling is correctly applied per fold without data leakage
+base_pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('model', LogisticRegression(random_state=42))
+])
 
-model = LogisticRegression(random_state=42)
-model.fit(X_train_scaled, y_train)
+base_pipeline.fit(X_train, y_train)
+y_pred = base_pipeline.predict(X_test)
+single_split_f1 = f1_score(y_test, y_pred)
 
-# ==========================================
-# Step 4: Assess performance metrics
-# ==========================================
-y_pred = model.predict(X_test_scaled)
-
-print("\n--- Model Performance Metrics ---")
+print("\n--- Single-Split Model Performance ---")
 print(f"Accuracy:  {accuracy_score(y_test, y_pred):.4f}")
 print(f"Precision: {precision_score(y_test, y_pred):.4f}")
 print(f"Recall:    {recall_score(y_test, y_pred):.4f}")
-print(f"F1 Score:  {f1_score(y_test, y_pred):.4f}\n")
+print(f"F1 Score:  {single_split_f1:.4f}\n")
 
 print("Classification Report:")
 print(classification_report(y_test, y_pred))
 
 # ==========================================
-# Step 5: Plot ROC curve
+# Step 4: 5-Fold Cross-Validation Enhancement
 # ==========================================
-y_prob = model.predict_proba(X_test_scaled)[:, 1]
+cv_pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('model', LogisticRegression(random_state=42))
+])
 
-fpr, tpr, _ = roc_curve(y_test, y_prob)
+# Calculate F1 score across 5 folds
+cv_scores = cross_val_score(cv_pipeline, X, y, cv=5, scoring='f1')
+mean_cv_f1 = cv_scores.mean()
+
+print("--- 5-Fold Cross-Validation Performance ---")
+print(f"F1 Scores across folds: {[round(score, 4) for score in cv_scores]}")
+print(f"Mean 5-Fold CV F1 Score: {mean_cv_f1:.4f}\n")
+
+# ==========================================
+# Step 5: Performance Comparison & Documentation
+# ==========================================
+print("--- Comparison & Summary ---")
+print(f"Single-Split F1 Score : {single_split_f1:.4f}")
+print(f"Mean 5-Fold CV F1 Score: {mean_cv_f1:.4f}")
+print(
+    "Documentation Insight: Cross-validation gives a more reliable, generalized "
+    "performance estimate across multiple data partitions, reducing the risk of "
+    "overfitting to a single random train-test split."
+)
+
+# ==========================================
+# Step 6: Plot ROC curve (using test split)
+# ==========================================
+y_prob = base_pipeline.predict_proba(X_test)[:, 1]
 roc_auc = roc_auc_score(y_test, y_prob)
+fpr, tpr, _ = roc_curve(y_test, y_prob)
 
 plt.figure(figsize=(8, 6))
 plt.plot(
@@ -100,7 +125,7 @@ plt.ylim([0.0, 1.05])
 plt.xlabel("False Positive Rate", fontsize=12)
 plt.ylabel("True Positive Rate", fontsize=12)
 plt.title(
-    "Receiver Operating Characteristic (ROC) Curve - Titanic", fontsize=14
+    "Receiver Operating Characteristic (ROC) Curve - Titanic (CV Enhanced)", fontsize=14
 )
 plt.legend(loc="lower right", fontsize=12)
 plt.grid(alpha=0.3)
